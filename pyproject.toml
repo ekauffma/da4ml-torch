@@ -23,10 +23,11 @@ classifiers = [
 ]
 dynamic = ["version"]
 
-dependencies = ["da4ml", "torch"]
+dependencies = ["da4ml", "torch", "torchlogix"]
 urls.repository = "https://github.com/calad0i/da4ml-torch"
 
 entry-points."dais_tracer.plugins".torch = "da4ml_torch.parser:TorchParser"
+entry-points."dais_tracer.plugins".torchlogix = "da4ml_torch.parser:TorchParser"
 
 [tool.setuptools]
 packages = ["da4ml_torch"]
