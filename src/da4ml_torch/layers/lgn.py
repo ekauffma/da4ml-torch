@@ -2,7 +2,8 @@ import numpy as np
 from da4ml.trace import FixedVariableArray
 
 from ._base import ReplayBase
-from ._standalone_inference import GroupSum, LogicConv2d, LogicDense, OrPooling2d
+from ._standalone_inference import GroupSum, OrPooling2d
+from torchlogix.layers import LogicConv2d, LogicDense
 
 _map = [
     lambda a, b: 0,
@@ -40,6 +41,13 @@ class ReplayLogicConv2d(ReplayBase):
     def call(self, inputs: FixedVariableArray):
         self.module: LogicConv2d
 
+        # Safety check: model must be in eval mode for discrete LUT extraction
+        assert not self.module.training, (
+            "LogicConv2d module must be in eval mode for synthesis. "
+            "Call model.eval() before tracing."
+        )
+
+        # Apply padding if needed
         if self.module.padding > 0:
             inputs = np.pad(
                 inputs,  # type: ignore
@@ -48,8 +56,19 @@ class ReplayLogicConv2d(ReplayBase):
                 constant_values=0,
             )  # type: ignore
 
-        conn_0: np.ndarray = self.module.connection_indices_0.cpu().detach().numpy()  # type: ignore
-        lut_0: np.ndarray = self.module.lut_ids_0.cpu().detach().numpy()  # type: ignore
+        # Get all LUTs and connection indices for the entire tree
+        tree_luts, tree_ids = self.module.get_luts_and_ids()
+        conn_indices = self.module.connections.indices
+
+        # Level 0: Extract from receptive field
+        # conn_indices[0] shape: [lut_rank, num_kernels, num_positions, num_leaves, 3]
+        conn_0: np.ndarray = conn_indices[0].cpu().detach().numpy()  # type: ignore
+
+        # tree_ids[0] is a list of tensors, one per node at level 0
+        # Each tree_ids[0][i] has shape [num_kernels]
+        # Stack them to get shape [num_leaves, num_kernels]
+        lut_0_list = [tree_ids[0][i].cpu().detach().numpy() for i in range(len(tree_ids[0]))]
+        lut_0 = np.stack(lut_0_list, axis=0)  # Shape: [num_leaves, num_kernels]
 
         # Extract h, w, c indices
         h_idx = conn_0[..., 0]  # shape: [2, num_kernels, num_positions, num_leaves]
@@ -75,11 +94,15 @@ class ReplayLogicConv2d(ReplayBase):
         result = apply_lut_vectorized(a_flat, b_flat, lut_0_flat)
         result = result.reshape(batch, P, K, L).transpose((0, 2, 1, 3))  # [batch, K, P, L]
 
-        for level in range(1, self.module.tree_depth + 1):
-            lut_level = getattr(self.module, f'lut_ids_{level}')
-            conn_level = getattr(self.module, f'connection_indices_{level}')
-            lut_level = lut_level.cpu().detach().numpy()  # type: ignore
-            conn_level = conn_level.cpu().detach().numpy()  # type: ignore
+        # Process remaining tree levels
+        for level in range(1, self.module.tree_depth):
+            # tree_ids[level] is a list of tensors for this level
+            # Stack them to get shape [num_nodes, num_kernels]
+            lut_level_list = [tree_ids[level][i].cpu().detach().numpy() for i in range(len(tree_ids[level]))]
+            lut_level = np.stack(lut_level_list, axis=0)  # Shape: [num_nodes, num_kernels]
+
+            # conn_indices[level] for level > 0 has shape [lut_rank, num_nodes]
+            conn_level: np.ndarray = conn_indices[level].cpu().detach().numpy()  # type: ignore
 
             selected = result[..., conn_level]
 
@@ -94,8 +117,14 @@ class ReplayLogicConv2d(ReplayBase):
             result = apply_lut_vectorized(a_flat, b_flat, lut_flat)
             result = result.reshape(batch, P, K, N).transpose((0, 2, 1, 3))  # [batch, K, P, N]
 
+        # Calculate output dimensions dynamically
+        out_dim = tuple([
+            (in_d + 2 * self.module.padding - rf) // self.module.stride + 1
+            for in_d, rf in zip(self.module.in_dim, self.module.receptive_field_size)
+        ])
+
         result = result[..., 0]
-        result = result.reshape(batch, self.module.num_kernels, *self.module.out_dim)
+        result = result.reshape(batch, self.module.num_kernels, *out_dim)
 
         return result
 
@@ -106,14 +135,24 @@ class ReplayLogicDense(ReplayBase):
     def call(self, inputs: FixedVariableArray):
         self.module: LogicDense
 
-        connection_indices = self.module.connection_indices.cpu().detach().numpy()  # type: ignore
+        # Safety check: model must be in eval mode for discrete LUT extraction
+        assert not self.module.training, (
+            "LogicDense module must be in eval mode for synthesis. "
+            "Call model.eval() before tracing."
+        )
+
+        # Extract connection indices from connections object
+        connection_indices = self.module.connections.indices.cpu().detach().numpy()  # type: ignore
         selected = inputs[..., connection_indices]
 
         # Extract first and second inputs for each neuron
         a = selected[..., 0, :]  # shape: (..., out_dim)
         b = selected[..., 1, :]  # shape: (..., out_dim)
 
-        lut_ids = self.module.lut_ids.cpu().detach().numpy()  # type: ignore
+        # Get discrete LUTs and IDs using parametrization method
+        luts, lut_ids = self.module.get_luts_and_ids()
+        lut_ids = lut_ids.cpu().detach().numpy()  # type: ignore
+
         # Apply logic operations
         return apply_lut_vectorized(a, b, lut_ids)
 
