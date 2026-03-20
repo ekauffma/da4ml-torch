@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from torchlogix.layers import LogicDense, LogicConv2d
+from torchlogix.layers import LogicDense, LogicConv2d, GroupSum
 import pytest
 from da4ml.converter import trace_model
 from da4ml.trace import comb_trace, FixedVariableArrayInput
@@ -17,12 +17,13 @@ def test_dense_layer():
     )
     model.eval()
 
-    inp, out = trace_model(model, inputs=FixedVariableArrayInput((layer.in_dim)).quantize(0,1,1))
+    inp, out = trace_model(model, inputs=FixedVariableArrayInput((1, layer.in_dim)).quantize(0,1,1))
 
     comb = comb_trace(inp, out)
 
     # random boolean input
-    data_in = np.random.randint(0, 2, (2**10, layer.in_dim)).astype(np.float32)
+    data_in = np.random.randint(0, 2, (2**10, layer.in_dim)).astype(bool)
+    print(f"data_in shape: {data_in.shape}, dtype: {data_in.dtype}")
 
     with torch.no_grad():
         torch_out = model(torch.from_numpy(data_in)).numpy()
@@ -34,8 +35,6 @@ def test_dense_layer():
 
 def test_conv_layer():
     layer = LogicConv2d(in_dim=28, channels=1,num_kernels=16, receptive_field_size=3, tree_depth=3)
-
-    print(f"{layer.in_dim=}")
 
     model = torch.nn.Sequential(
         layer
@@ -58,3 +57,7 @@ def test_conv_layer():
     torch_out_flat = torch_out.reshape(torch_out.shape[0], -1)
 
     assert np.array_equal(torch_out_flat, comb_out), "Outputs do not match!"
+
+
+# def test_group_sum_layer():
+#     layer = GroupSum()
