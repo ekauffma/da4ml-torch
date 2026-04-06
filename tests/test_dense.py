@@ -55,3 +55,31 @@ def test_conv_layer():
     torch_out = torch_out.reshape(comb_out.shape)
 
     assert np.array_equal(torch_out, comb_out), "Outputs do not match!"
+
+def test_nonsequential_model():
+
+    class NonSequentialModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layer1 = LogicDense(in_dim=64, out_dim=64)
+            self.layer2 = LogicDense(in_dim=64, out_dim=64)
+
+        def forward(self, x):
+            out1 = self.layer1(x)
+            out2 = self.layer2(x)
+            return out1 * out2 # AND of the two layers
+
+    model = NonSequentialModel()
+    model.eval()
+
+    inp, out = trace_model(model, inputs=FixedVariableArrayInput((1, 64)).quantize(0,1,1), framework='torch')
+
+    comb = comb_trace(inp, out)
+
+    data_in = np.random.randint(0, 2, (2**10, 64)).astype(np.float32)
+
+    with torch.no_grad():
+        torch_out = model(torch.from_numpy(data_in)).numpy()
+
+    comb_out = comb.predict(data_in)
+    assert np.array_equal(torch_out, comb_out), "Outputs do not match!"

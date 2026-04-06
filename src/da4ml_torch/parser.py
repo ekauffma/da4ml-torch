@@ -52,7 +52,9 @@ class TorchParser(DAISTracerPluginBase):
                     _lwargs = {k: env[v.name] for k, v in kwargs.items()}
                     env[node.name] = replay(*_args, **_lwargs)
                 case 'call_function':
-                    raise NotImplementedError(f'call_function is not supported: {target}')
+                    _args = tuple(env[n.name] if isinstance(n, Node) else n for n in args)
+                    _kwargs = {k: env[v.name] if isinstance(v, Node) else v for k, v in kwargs.items()}
+                    env[node.name] = target(*_args, **_kwargs)
                 case 'call_method':
                     raise NotImplementedError(f'call_method is not supported: {target}')
                 case 'placeholder':
