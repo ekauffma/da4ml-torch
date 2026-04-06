@@ -2,9 +2,7 @@ import numpy as np
 from da4ml.trace import FixedVariableArray
 
 from ._base import ReplayBase
-from ._standalone_inference import GroupSum, OrPooling2d
-from torchlogix.layers import LogicConv2d, LogicDense
-
+from torchlogix.layers import LogicConv2d, LogicDense, GroupSum, OrPooling2d
 
 class ReplayLogicConv2d(ReplayBase):
     handles = (LogicConv2d,)
