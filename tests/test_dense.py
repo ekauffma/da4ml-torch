@@ -17,7 +17,7 @@ def test_dense_layer():
     )
     model.eval()
 
-    inp, out = trace_model(model, inputs=FixedVariableArrayInput((layer.in_dim)).quantize(0,1,1))
+    inp, out = trace_model(model, inputs=FixedVariableArrayInput((1, layer.in_dim)).quantize(0,1,1))
 
     comb = comb_trace(inp, out)
 
@@ -28,7 +28,6 @@ def test_dense_layer():
         torch_out = model(torch.from_numpy(data_in)).numpy()
     
     comb_out = comb.predict(data_in)
-
     assert np.array_equal(torch_out, comb_out), "Outputs do not match!"
 
 
@@ -53,5 +52,6 @@ def test_conv_layer():
         torch_out = model(torch.from_numpy(data_in)).numpy()
 
     comb_out = comb.predict(data_in)
+    torch_out = torch_out.reshape(comb_out.shape)
 
     assert np.array_equal(torch_out, comb_out), "Outputs do not match!"
