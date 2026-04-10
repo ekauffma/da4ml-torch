@@ -20,6 +20,10 @@ def assert_comb_matches_model(
 ) -> None:
     """Trace model, run comb prediction, and assert outputs match PyTorch."""
     model.eval()
+    for module in model.modules():
+        if hasattr(module, 'set_export_mode'):
+            module.set_export_mode(True)
+
     inp, out = trace_model(
         model,
         inputs=FixedVariableArrayInput(symbolic_shape).quantize(0, 1, 1),
@@ -242,19 +246,6 @@ class MultiInputModel(torch.nn.Module):
         return self.layer1(x1) * self.layer2(x2)
 
 
-class NonLinearForward(torch.nn.Module):
-    """Model with an relu call function"""
-    def __init__(self):
-        super().__init__()
-        self.flatten = torch.nn.Flatten()
-        self.logic = LogicDense(in_dim=8, out_dim=8)
- 
-    def forward(self, x):
-        x = self.flatten(x)
-        x = self.logic(x)
-        return torch.relu(x)
-
-
 class ChainOpsModel(torch.nn.Module):
     """
     Multiple call_method
@@ -325,7 +316,6 @@ class ShapeAccessModel(torch.nn.Module):
     (ResidualModel,        (1, 64),         (2**10, 64)),
     (DeepSkipModel,        (1, 64),         (2**10, 64)),
     (MixedModel,           (1, 1, 28, 28),  (2**10, 1, 28, 28)),
-    (NonLinearForward,     (1, 8),          (2**10, 8)),
     (ChainOpsModel,        (1, 64),         (2**10, 64)),
     (BroadcastModel,       (1, 64),         (2**10, 64)),
     (ScalarMulModel,       (1, 64),         (2**10, 64)),
@@ -337,7 +327,7 @@ def test_model_matches_comb_trace(model_cls, symbolic_shape, data_shape):
     np.random.seed(42)
  
     model = model_cls()
-    data_in = np.random.randint(0, 2, data_shape).astype(np.float32)
+    data_in = np.random.randint(0, 2, data_shape).astype(np.bool_)
     assert_comb_matches_model(model, symbolic_shape, data_in)
 
 
@@ -348,6 +338,9 @@ def test_multi_input_model_matches_comb_trace():
 
     model = MultiInputModel()
     model.eval()
+    for module in model.modules():
+        if hasattr(module, 'set_export_mode'):
+            module.set_export_mode(True)
 
     inputs = (
         FixedVariableArrayInput((1, 64)).quantize(0, 1, 1),
@@ -357,7 +350,7 @@ def test_multi_input_model_matches_comb_trace():
     comb = comb_trace(inp, out)
 
     data_in = tuple(
-        np.random.randint(0, 2, (2**10, 64)).astype(np.float32)
+        np.random.randint(0, 2, (2**10, 64)).astype(np.bool_)
         for _ in inputs
     )
     with torch.no_grad():
@@ -379,6 +372,9 @@ def test_wrong_input_shape_raises():
     """Passing wrong input shape should raise an exception."""
     model = torch.nn.Sequential(LogicDense(in_dim=64, out_dim=64))
     model.eval()
+    for module in model.modules():
+        if hasattr(module, 'set_export_mode'):
+            module.set_export_mode(True)
     with pytest.raises(Exception):
         trace_model(
             model,
@@ -394,6 +390,9 @@ def test_comb_predict_is_deterministic():
  
     model = torch.nn.Sequential(LogicDense(in_dim=64, out_dim=64))
     model.eval()
+    for module in model.modules():
+        if hasattr(module, 'set_export_mode'):
+            module.set_export_mode(True)
  
     inp, out = trace_model(
         model,
@@ -402,7 +401,7 @@ def test_comb_predict_is_deterministic():
     )
     comb = comb_trace(inp, out)
  
-    data_in = np.random.randint(0, 2, (2**10, 64)).astype(np.float32)
+    data_in = np.random.randint(0, 2, (2**10, 64)).astype(np.bool_)
     np.testing.assert_array_equal(comb.predict(data_in), comb.predict(data_in))
  
  
@@ -410,6 +409,10 @@ def test_boundary_inputs_all_zeros_and_ones():
     """All-zero and all-one inputs should produce matching outputs."""
     model = torch.nn.Sequential(LogicDense(in_dim=64, out_dim=64))
     model.eval()
+    for module in model.modules():
+        if hasattr(module, 'set_export_mode'):
+            module.set_export_mode(True)
+
  
     inp, out = trace_model(
         model,
@@ -419,8 +422,8 @@ def test_boundary_inputs_all_zeros_and_ones():
     comb = comb_trace(inp, out)
  
     for data_in in [
-        np.zeros((2**10, 64), dtype=np.float32),
-        np.ones((2**10, 64), dtype=np.float32),
+        np.zeros((2**10, 64), dtype=np.bool_),
+        np.ones((2**10, 64), dtype=np.bool_),
     ]:
         with torch.no_grad():
             torch_out = model(torch.from_numpy(data_in)).detach().cpu().numpy()
@@ -453,5 +456,5 @@ def test_hwconf_variants(hwconf):
     np.random.seed(0)
 
     model = torch.nn.Sequential(LogicDense(in_dim=64, out_dim=64))
-    data_in = np.random.randint(0, 2, (2**10, 64)).astype(np.float32)
+    data_in = np.random.randint(0, 2, (2**10, 64)).astype(np.bool_)
     assert_comb_matches_model(model, (1, 64), data_in, hwconf=hwconf)

@@ -17,6 +17,10 @@ def assert_comb_matches_model(
 ) -> None:
     """Trace model, run comb prediction, and assert outputs match PyTorch."""
     model.eval()
+    for module in model.modules():
+        if hasattr(module, 'set_export_mode'):
+            module.set_export_mode(True)
+
     inp, out = trace_model(model, inputs=FixedVariableArrayInput(symbolic_shape).quantize(0, 1, 1))
     comb = comb_trace(inp, out)
 
@@ -43,7 +47,8 @@ def test_dense_layer():
  
     layer = LogicDense(in_dim=1024, out_dim=1024)
     model = torch.nn.Sequential(layer)
-    data_in = np.random.randint(0, 2, (2**10, layer.in_dim)).astype(np.float32)
+
+    data_in = np.random.randint(0, 2, (2**10, layer.in_dim)).astype(np.int64)
  
     assert_comb_matches_model(model, (1, layer.in_dim), data_in)
 
@@ -89,7 +94,7 @@ def test_conv_layer(in_dim, channels, num_kernels, receptive_field_size, tree_de
         tree_depth=tree_depth,
     )
     model = torch.nn.Sequential(layer)
-    data_in = np.random.randint(0, 2, (2**10, channels, *layer.in_dim)).astype(np.float32)
+    data_in = np.random.randint(0, 2, (2**10, channels, *layer.in_dim)).astype(np.bool_)
  
     assert_comb_matches_model(model, (1, channels, *layer.in_dim), data_in)
 
@@ -141,6 +146,6 @@ def test_or_pooling2d_layer(channels, h, w, kernel_size, stride, padding):
 
     layer = OrPooling2d(kernel_size=kernel_size, stride=stride, padding=padding)
     model = torch.nn.Sequential(layer)
-    data_in = np.random.randint(0, 2, (2**10, channels, h, w)).astype(np.float32)
+    data_in = np.random.randint(0, 2, (2**10, channels, h, w)).astype(np.bool_)
 
     assert_comb_matches_model(model, (1, channels, h, w), data_in)
